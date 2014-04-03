@@ -1,0 +1,19 @@
+Skład grupy:
+- Grzegorz Bednarski (lider)
+- Tomasz Miężał 
+
+Raport
+- Skompilowano narzędzie http://lcamtuf.coredump.cx/strikeout/
+-  Przetestowano na prostych doc'ach:
+Działa ekstrachowanie zmian z plików
+Działa skanowanie katalogów w poszukiwaniu doc'ów
+Nie działa skanowanie stron www w poszukiwaniu doc'ów. (stare google query?)
+-  Zrobiono research na temat ekstrachowania zmian z docx'ów
+
+Zobowiązanie:
+- Zebrać korpus dokumentów (doc, docx) w liczbie co najmniej 1 000.
+odf? Dokumenty równoległe?
+- Rozszerzyc tools'y Lcamtuf'a o ekstrachowanie z docx.
+- Przeszukać strony Open Directory Project w poszukiwaniu komentarzy html w liczbie co najmniej 100 000.
+- Nakarmić zebranymi danymi Apache Solr'a.
+- Stworzyć prosty interfejs do wyszukiwania.
