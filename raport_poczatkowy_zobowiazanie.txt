@@ -4,10 +4,10 @@ Skład grupy:
 
 Raport
 - Skompilowano narzędzie http://lcamtuf.coredump.cx/strikeout/
--  Przetestowano na prostych doc'ach:
-Działa ekstrachowanie zmian z plików
-Działa skanowanie katalogów w poszukiwaniu doc'ów
-Nie działa skanowanie stron www w poszukiwaniu doc'ów. (stare google query?)
+- Przetestowano na prostych doc'ach:
+    - Działa ekstrachowanie zmian z plików
+    - Działa skanowanie katalogów w poszukiwaniu doc'ów
+    - Nie działa skanowanie stron www w poszukiwaniu doc'ów. (stare google query?)
 -  Zrobiono research na temat ekstrachowania zmian z docx'ów
 
 Zobowiązanie:
