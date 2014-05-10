@@ -1,0 +1,146 @@
+#!/bin/bash
+#
+# The Revisionist - MS Word document metadata analysis system
+# -----------------------------------------------------------
+#
+# Copyright (C) 2004-2006 by Michal Zalewski <lcamtuf@coredump.cx>
+#
+# This script prepares a list of URLs that likely point to an Office document.
+# As it stands, it is capable of running in two modes: analyzing local file
+# store (either physically on the disk, or mounted via SMB), or running a web
+# engine search.
+#
+# You can modify it to use any other feed; note that you might have
+# to update 'fetchdoc' accordingly to be able to access results properly.
+#
+# This script takes two or three parameters:
+#
+# keyword  - return only documents that contain this keyword
+# site	   - site qualifier (gov, microsoft.com, @/path/to/local/dir)
+# lang     - language code (web search only: pl, en, etc)
+#
+# WARNING: This engine may violate Google Terms of Service when used in
+# HTTP search mode. Although this code does not generate a massive
+# volume of requests (max. 10 per search), it is still a bit naughty.
+# You are encouraged to avoid this, and code a version that uses Google API
+# instead; I just needed a quick hack, which was OK for one-time use, but
+# may be less OK if the tool becomes popular.
+#
+# Google folks: if you are reading this, I have used a distinct User-Agent
+# parameter for this code ("The Revisionist"). You may easily check for the
+# volume of traffic you are getting from this tool, and eventually drop
+# all requests if it becomes too much of a problem.
+#
+
+if [ "$THEREV" = "" ]; then
+  echo "-- This is a component of therev - run the main program instead --" 1>&2
+  exit 1
+fi
+
+if [ "$#" -lt "2" ]; then
+  echo "Usage: $0 'keyword' 'site' [ lang ]" 1>&2
+  exit 1
+fi
+
+KWORD=`echo "$1" | tr '[A-Z ]' '[a-z+]'`
+SITE="$2"
+L=`echo "$3" | tr '[A-Z]' '[a-z]'`
+
+if echo "$SITE" | grep -q ^@; then
+
+  if [ ! "$L" = "" ]; then
+    echo "[!] WARNING: Language settings make no sense for local mode." 1>&2
+  fi
+
+  dir="`echo "$SITE" | cut -b2-`"
+
+  if [ ! -d "$dir" ]; then
+    echo "[-] ERROR: $dir not a readable directory." 1>&2
+    exit 1
+  fi
+
+  fparam="-iname *.doc"
+
+  if [ ! "$KWORD" = "" ]; then
+    fparam="( $fparam ) -exec $THEREV/unigrep {} $KWORD ; -print"
+  fi
+
+  echo -n "[*] Searching for documents... " 1>&2
+
+  find "$dir" $fparam
+
+  echo "done" 1>&2
+
+else
+
+  if ! host -t mx "$SITE." &>/dev/null; then
+    echo "[-] ERROR: Search domain does not seem to resolve." 1>&2
+    exit 1
+  fi
+
+  echo "*****************************************************************************" 1>&2
+  echo "* WARNING: Using Google search mode may violate their Terms of Service. The *" 1>&2
+  echo "* approach I used is harmless for homebrew uses, but if the tool becomes    *" 1>&2
+  echo "* very popular, they may get upset. As such, if you find this tool useful,  *" 1>&2
+  echo "* I encourage you to support both this software and your favourite search   *" 1>&2
+  echo "* engine, and donate a code that uses Google API instead. Thanks!           *" 1>&2
+  echo "*****************************************************************************" 1>&2
+
+  test "$L" = "" || L="&lr:lang_$L"
+
+  TMP=`mktemp $TMPDIR/.getdoc-XXXXXXXX`
+
+  if [ ! "$?" = "0" ]; then
+    echo "[-] ERROR: Cannot create temporary file in $TMPDIR." 1>&2
+    exit 1
+  fi
+
+  TMP2=`mktemp $TMPDIR/.getdoc-XXXXXXXX`
+
+  if [ ! "$?" = "0" ]; then
+    echo "[-] ERROR: Cannot create temporary file in $TMPDIR." 1>&2
+    exit 1
+  fi
+
+  CUR=0
+
+  echo -n "[*] Searching the web... " 1>&2
+
+  for off in 0 1 2 3 4 5 6 7 8 9; do
+
+    $LYNX -source -useragent="$UAGENT" -connect_timeout=30 \
+      'http://www.google.com/#q="'$KWORD'"+site:'$SITE'+filetype:doc' >$TMP2
+
+    if [ ! "$?" = "0" ]; then
+      echo "[-] ERROR: Fetch of Google.com failed (lynx or network issue)." 1>&2
+      rm -f "$TMP2" "$TMP"
+      exit 1
+    fi
+
+    #cat "$TMP2" | sed 's/>/\ /g' | grep -A 1 '/span' | grep href= | cut -d= -f3- | sed 's/"//g' >>$TMP 2>/dev/null
+    cat "$TMP2" | grep href= | cut -d= -f3- | sed 's/"//g' >>$TMP 2>/dev/null
+
+    rm -f "$TMP2"
+
+    NC=`cat $TMP | sort | uniq | grep -cE '^http:|^https:|^ftp:'`
+
+    # If less than 10 new pages in this run, something's rotten
+    # in the state of Denmark.
+
+    echo -n "$off:$[NC-CUR] " 1>&2
+    test "$[NC-CUR]" -lt "10" && break
+    CUR=$NC
+
+  done
+
+  test "$off-$NC" = "0-0" && echo -n "<NULL SEARCH> " 1>&2
+  echo "done" 1>&2
+
+  test "$off" = "9" && echo "[!] WARNING: Plenty of results (>1000). Consider sub-searches." 1>&2
+
+  cat "$TMP" | sort | uniq | grep -E '^http:|^https:|^ftp:'
+  #rm -f "$TMP"
+
+fi
+
+exit 0

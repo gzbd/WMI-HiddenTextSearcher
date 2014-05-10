@@ -1,0 +1,68 @@
+#!/bin/bash
+#
+# The Revisionist - MS Word document metadata analysis system
+# -----------------------------------------------------------
+#
+# Copyright (C) 2004-2006 by Michal Zalewski <lcamtuf@coredump.cx>
+#
+# This script quickly determines if there are any changes saved in
+# the document. If no, it does nothing. If yes, it creates an
+# annotated HTML dump of the document and returns path to a temporary
+# file on stdout, along with the total length of non-whitespace deleted
+# text.
+#
+
+if [ "$THEREV" = "" ]; then
+  echo "-- This is a component of therev - run the main program instead --" 1>&2  
+  exit 1
+fi
+
+if [ ! "$#" = "1" ]; then
+  echo "Usage: $0 file" 1>&2
+  exit 1
+fi
+
+# First, perform a quick check
+# FIXME: This is not always accurate - change tracking can be on w/o this tag
+# http://csrc.nist.gov/fasp/FASPDocs/authorize-process/SOW-CA-BPA.doc
+# grep -UqF AdHocReviewCycleID "$1" || exit 0
+
+# If passed, proceed with more expensive processing:
+
+TMP="`mktemp -d $TMPDIR/document.XXXXXX`"
+
+if [ ! "$?" = "0" ]; then
+  echo "[!] WARNING: Failed to create temporary file in $TMPDIR." 1>&2
+  exit 1
+fi
+
+$WVHTML --datadir="$THEREV" --targetdir="$TMP" \
+  "$1" "document.html" 2>"$TMP/process.log"
+
+if [ ! "$?" = "0" ]; then
+  rm -rf "$TMP"
+  exit 1
+fi
+
+# Nothing interesting inside?
+if ! grep -UqE '_DELETED_|_COMMENT_' "$TMP/document.html"; then
+  rm -rf "$TMP"
+  exit 0
+fi
+
+DCNT=`$LYNX -dump -width 1024 "$TMP/document.html" | $THEREV/cntdelal 2>/dev/null`
+
+if [ "$DCNT" = "" ]; then
+  rm -rf "$TMP"
+  exit 1
+fi
+
+if [ "$DCNT" = "0" ]; then
+  rm -rf "$TMP"
+  exit 0
+fi
+
+echo "$DCNT $TMP/document.html"
+exit 0
+
+

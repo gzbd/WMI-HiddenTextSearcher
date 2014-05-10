@@ -1,0 +1,146 @@
+
+  The Revisionist - MS Word document metadata analysis system 0.2b
+  ----------------------------------------------------------------
+  Copyright (C) 2004-2006 by Michal Zalewski <lcamtuf@coredump.cx>
+  
+============
+INTRODUCTION
+============
+
+The Revisionist is a humble set of scripts I developed immediately
+after releasing a write-up on the "hidden" data I managed to recover from
+Microsoft's documents (http://lcamtuf.coredump.cx/strikeout/).
+
+My primary goal is to provide pen-testers and content administrators with
+a handy tool to detect hidden data in all documents available at a specific 
+location (be it a locally mounted network share, a HTTP site, or whatnot),
+and easily review it all. Right now, the tool only detects and indexes
+deleted text in documents with "change tracking" enabled, and can also
+index usernames and hardware addresses embedded in documents (to 
+facilitate external assessment of company structure); future versions should
+be able to recover other goodies, too.
+
+=====
+USAGE
+=====
+
+To run the tool against a local directory, a mounted SMB or NFS directory,
+or such, simply issue the following command (after doing 'make', that is):
+
+  ./therev '' @/path/to/directory
+
+After the tool completes, you should be able to view 'master.html' in
+current directory using your favourite browser (Lynx, Netscape, etc).
+Cached copies of documents would be placed in subdirectories named
+document.XXXXXX, where X is a random digit; hence, it is recommended
+to run the tool in a separate directory.
+
+Note that you may also instruct the tool to look for specific substring
+and only choose those documents that contain it (strict checking, no 
+regexp available):
+
+  ./therev 'linux' @/path/to/directory
+
+To run the program against a specific site or top-level domain, do
+the following:
+
+  ./therev '' site.com
+
+Note that 'com', 'gov', 'gov.pl', 'www.microsoft.com' are all a valid
+site name. The first parameter works similar to the previous case:
+
+  ./therev 'homeland security' gov
+
+As a special bonus, when running the script against multilinguinal sites,
+you might want to specify a third parameter - desired language (using
+a two-letter code: en, pl, etc). NOTE: DO NOT USE LANGUAGE QUALIFIER
+UNLESS NECESSARY:
+
+  ./therev 'linux' microsoft.com en
+
+The HTTP search mode uses Google.com to locate all matching Word documents
+on a specific site. For a document to be found, it must be indexable 
+(that is, not excluded in robots.txt) and be in the first 1000 of results
+for a specific site. If there are more than 1000 documents at some
+website, consider sub-searches with keywords.
+
+================================
+IMPORTANT NOTE ABOUT HTTP SEARCH
+================================
+
+WARNING: This engine may violate Google Terms of Service when used in
+HTTP search mode. Although this code does not generate a massive
+volume of requests (max. 10 per search), it is still a bit naughty.
+You are encouraged to avoid this, and code a version that uses Google API
+instead; I just needed a quick hack, which was OK for one-time use, but
+may be less OK if the tool becomes popular.
+
+Google folks: if you are reading this, I have used a distinct User-Agent
+parameter for this code ("The Revisionist"). You may easily check for the
+volume of traffic you are getting from this tool, and eventually drop
+all requests if it becomes too much of a problem.
+
+============
+REQUIREMENTS
+============
+
+This tool currently runs only on Linux (although might work fine on
+any compatible system with minor tweaks), and depends on the following:
+
+  - Bourne Again Shell (bash), preferably 2.x
+    http://www.gnu.org/software/bash/bash.html
+
+  - wvWare toolkit 1.0.0 or newer - but NOT 2.x
+    http://wvware.sf.net
+
+  - libole2 - theoretically optional, used for username extraction only
+    ftp://ftp.gnome.org/pub/gnome/sources/libole2/
+
+  - A reasonably recent version of Lynx (preferably SSL-enabled)
+    http://lynx.browser.org
+
+Be sure that therev.conf (~/.therev.conf, /etc/therev.conf or 
+./therev.conf) point to proper locations for all those programs.
+
+============
+INSTALLATION
+============
+
+The tool is not yet suitable for installation - simply compile it and
+run.
+
+If you really want to, you may manually put all files in /usr/local/therev,
+then link ./usr/local/therev/therev to /usr/local/bin and put
+therev.conf in /etc or ~/.therev.conf, changing file locations specified
+in there.
+
+================
+SECURITY WARNING
+================
+
+Please note that wvWare is a fairly vulnerable beast, and so are my
+hacked up shell scripts. It is theoretically possible for a malicious site
+to exploit wvWare and gain control over your local system. As such, do not
+run this script against sites or directories you have a damn good reason
+to distrust.
+
+=========
+CHANGELOG
+=========
+
+  [0.02b] Made compatible with new Google interface; some other minor
+  fixes included.
+
+====
+TODO
+====
+
+  - Move to tweaked antiword for quick and reliable discovery
+  - Implement Google API interface
+  - Implement direct spider interface
+  - Collect other metadata
+  - Be more portable
+  - Display samples of deleted text?
+  - Allow for output directory to be specified
+  - Improve compilation and installation process
+

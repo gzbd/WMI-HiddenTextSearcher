@@ -1,0 +1,301 @@
+#!/bin/bash
+#
+# The Revisionist - MS Word document metadata analysis system
+# -----------------------------------------------------------
+#
+# Copyright (C) 2004-2006 by Michal Zalewski <lcamtuf@coredump.cx>
+#
+# The Revisionist automatically reviews documents at a specific
+# site, set of sites, or at a given disk / network location,
+# and finds ones that contain hidden "deleted" fragments (recovering
+# them) and/or contain user or computer information that may be
+# suitable for pen-testing.
+#
+# This is the main entry point for the program.
+#
+
+echo "The Revisionist - MS Word document metadata analysis (0.2-beta)"
+echo "Copyright (C) 2004-2006 by Michal Zalewski <lcamtuf@coredump.cx>"
+echo "Visit http://lcamtuf.coredump.cx/ for more information."
+echo
+
+if [ "$#" -lt "2" ]; then
+
+  cat <<_EOF_ 1>&2
+This tool performs a comprehensive analysis of MS Word documents at a
+specific website or filesystem location to recover deleted text and
+other metadata useful in security testing and other tasks.
+
+Usage: $0 'search_expression' site_specification [ language ]
+
+  Search expression is a keyword or phrase to look for; it may contain
+  spaces, but needs to be a single parameter (use quotes). This parameter
+  may initially be blank (''), and later used to refine subsequent searches.
+  Note that search expressions may work differently for different search
+  types, depending on tool antics.
+
+  Site specification is a fully qualified domain or system name. You can
+  use TLD or anything below ('gov', 'nist.gov', 'webbook.nist.gov' are all
+  valid). If you want to perform a local search on a physical disk or
+  a remote filesystem (SMB, NFS), use a full path preceeded with @
+  (for example '@/mnt/hdc2/Documents And Settings').
+
+  Language is an optional parameter valid for web searches only, and is
+  useful if you want to get results for a given popular language (en, pl)
+  only. Note that this should only be used for multilinguinal websites,
+  and may deteriorate search accuracy otherwise.
+
+  WARNING: Results (directories named 'document.XXXXXX' and file
+  'master.html') are written in current directory! Don't be surprised.
+
+Please refer to documentation for more information on how to use the tool.
+
+_EOF_
+
+  exit 1
+
+fi
+
+. ~/.therev.conf 2>/dev/null
+test "$?" = "0" || . /etc/therev.conf 2>/dev/null
+test "$?" = "0" || . ./therev.conf 2>/dev/null
+
+if [ ! "$?" = "0" ]; then
+  echo "[-] ERROR: therev.conf not found. Please reinstall software." 1>&2
+  exit 1
+fi
+
+if [ "$THEREV" = "" ]; then
+  echo "[-] ERROR: Incomplete therev.conf settings. Please reinstall." 1>&2
+  exit 1
+fi
+
+if [ ! -x "$LYNX" ]; then
+  echo "[-] ERROR: $LYNX not found. Please set \$LYNX or update therev.conf." 1>&2
+  exit 1
+fi
+
+if [ ! -x "$WVHTML" ]; then
+  echo "[-] ERROR: $WVHTML not found. Please set \$WVHTML or update therev.conf." 1>&2
+  exit 1
+fi
+
+MAJOR=`$WVHTML --version 2>/dev/null | cut -d. -f1`
+
+if [ "$MAJOR" -lt "1" ]; then
+  echo "[-] ERROR: wvWare 1.0.0 or better is required. Please upgrade." 1>&2
+  exit 1
+fi
+
+if [ ! -x "$LYNX_SSL" ]; then
+  echo "[!] WARNING: $LYNX_SSL not found, will not search SSL sites." 1>&2
+  echo "    If you have SSL-enabled lynx, set \$LYNX_SSL or update therev.conf" 1>&2
+fi
+
+if [ -x "$THEREV/unigrep" -a -x "$THEREV/getdoclist" -a \
+     -x "$THEREV/fetchdoc" -a -x "$THEREV/finddel" -a \
+     -x "$THEREV/cntdelal" -a -f "$THEREV/wv/wvHtml.xml" -a \
+     -x "$THEREV/getmacdoc" ]; then
+  true
+else
+  echo "[-] ERROR: Some or all companion scripts not found in $THEREV directory." 1>&2
+  echo "    Set \$THEREV or update therev.conf" 1>&2
+  exit 1
+fi
+
+if [ ! -d "$TMPDIR" ]; then
+  echo "[-] ERROR: temporary directory $TMPDIR does not seem to exist." 1>&2
+  echo "    Please set \$TMPDIR or update therev.conf" 1>&2
+  exit 1
+fi
+
+TMP=`mktemp "$TMPDIR/.therev-XXXXXXXX"`
+
+if [ ! "$?" = "0" ]; then
+  echo "[-] ERROR: Cannot create temporary file in $TMPDIR." 1>&2
+  echo "    Please set \$TMPDIR or update therev.conf" 1>&2
+  exit 1
+fi
+
+OUTF=`mktemp "$TMPDIR/.therevF-XXXXXXXX"`
+
+if [ ! "$?" = "0" ]; then
+  rm -f "$TMP"
+  echo "[-] ERROR: Cannot create temporary file in $TMPDIR." 1>&2
+  exit 1
+fi
+
+OUTA=`mktemp "$TMPDIR/.therevA-XXXXXXXX"`
+
+if [ ! "$?" = "0" ]; then
+  rm -f "$TMP" "$OUTF"
+  echo "[-] ERROR: Cannot create temporary file in $TMPDIR." 1>&2
+  exit 1
+fi
+
+$THEREV/getdoclist "$1" "$2" "$3" >$TMP
+
+if [ ! "$?" = "0" ]; then
+  rm -f "$OUTF" "$TMP" "$OUTA"
+  exit 1
+fi
+
+C=$[`cat "$TMP" | wc -l`]
+
+if [ "$C" = "0" ]; then
+  rm -f "$OUTF" "$TMP" "$OUTA"
+  echo "[!] Nothing to do bailing out." 1>&2
+  exit 1
+fi
+
+echo "[+] Found $C candidates, processing..."
+
+FETCH_OK=0
+PROCESS_OK=0
+CHANGES=0
+CHGVOL=0
+TRIED=0
+FSIZE=0
+AUTHORS=0
+
+while read -r url; do
+
+
+  echo -ne "\r[*] Tried $TRIED, got $FETCH_OK ($PROCESS_OK valid, $CHANGES w/changes, $AUTHORS users) - $[FSIZE/1024] kB... "
+
+  TRIED=$[TRIED+1]
+
+  N=`$THEREV/fetchdoc "$url"`
+  test "$?" = "0" || continue
+  FETCH_OK=$[FETCH_OK+1]
+
+  if [ "$N" = "" ]; then
+    RS=`wc -c "$url" 2>/dev/null | awk '{print $1}'`
+    OUT=`$THEREV/finddel "$url"`
+    RES="$?"
+    $THEREV/showauth "$url" >>$OUTA 2>/dev/null
+    $THEREV/getmacdoc <"$url" >>$OUTA 2>/dev/null
+  else
+    RS=`wc -c "$N" 2>/dev/null | awk '{print $1}'`
+    OUT=`$THEREV/finddel "$N"`
+    RES="$?"
+    $THEREV/showauth "$N" >>$OUTA 2>/dev/null
+    $THEREV/getmacdoc <"$N" >>$OUTA 2>/dev/null
+    rm -f "$N"
+  fi
+
+  AUTHORS=$[`cat "$OUTA" | sort | uniq | wc -l`]
+
+  test "$RES" = "0" || continue
+
+  test "$RS" = "" && RS=0
+  FSIZE=$[FSIZE+RS]
+
+  PROCESS_OK=$[PROCESS_OK+1]
+  test "$OUT" = "" && continue
+
+  C=`echo "$OUT" | cut -d' ' -f1`
+  FN=`echo "$OUT" | cut -d' ' -f2-`
+
+  CHANGES=$[CHANGES+1]
+  CHGVOL=$[CHGVOL+C]
+
+  echo "$C³$FN³$url" >>$OUTF
+
+done <"$TMP"
+
+rm -f "$TMP"
+
+echo -e "\r[+] Tried $TRIED, got $FETCH_OK ($PROCESS_OK valid, $CHANGES w/changes, $AUTHORS users) - $[FSIZE/1024] kB.    "
+
+if [ "$[AUTHORS+CHANGES]" = "0" ]; then
+  echo "[+] No noteworthy documents matched your criteria, exiting."
+  rm -f "$OUTF" "$OUTA"
+  exit 0
+fi
+
+echo -n "[*] Generating master index (master.html)"
+
+cat <<_EOF_ >master.html
+
+<html>
+<head>
+<title>The Revisionist: `date +"%Y-%m-%d %H:%M"` "$1" ($2) [${3:-any}]</title>
+</head>
+<body bgcolor=white alink=red vlink=magenta link=blue text=black>
+<font size=+3>
+<b>The Revisionist (0.2b)</b>
+</font><br>
+<font size=+1>
+MS Word document metadata analysis system
+</font>
+<br>
+<font size=gray>
+Copyright (C) 2004 by <a href="http://lcamtuf.coredump.cx">Michal
+Zalewski</a> (<a href="mailto:lcamtuf@coredump.cx">lcamtuf@coredump.cx</a>)
+</font>
+<hr>
+<p>
+<b>
+<table border=1>
+<tr><td>Date prepared:</td><td>`date +"%Y-%m-%d %H:%M"`</td>
+<tr><td>Preparer:</td><td>`whoami`@`uname -n`</td>
+<tr><td>Search substring:</td><td>"$1"</td>
+<tr><td>Site or path:</td><td>$2</td>
+<tr><td>Language:</td><td>${3:-any}</td>
+<tr><td>Checked:</td><td>$FETCH_OK/$TRIED ($AUTHORS users, $[FSIZE/1024] kB)</td>
+</table>
+<p>
+<table border=1>
+<tr><td bgcolor=yellow><b># hidden</b></td>
+<td bgcolor=yellow><b>Original document</b></td>
+<td bgcolor=yellow><b>Preview</b></td>
+_EOF_
+
+cat "$OUTF" | sort -r -n | uniq | while read -r line; do
+  CNT=`echo "$line" | cut -d'³' -f1`
+  HTML=`echo "$line" | cut -d'³' -f2`
+  ORIG=`echo "$line" | cut -d'³' -f3`
+
+  OS=`echo "$ORIG" | cut -b-60`
+  L=$[`echo "$OS" | wc -c`]
+  test "$L" = "60" && OS="$OS..."
+
+  echo "<tr><td>$CNT</td>"
+  echo "<td><a href="$ORIG">$OS</a></td>"
+  echo "<td><a href="$HTML">(View as HTML)</a></td>"
+
+  echo -n "." 1>&2
+
+done >>master.html
+
+if [ ! -s "$OUTF" ]; then
+  echo "<tr><td>(Nothing to display)</td>" >>master.html
+fi
+
+rm -f "$OUTF"
+
+echo "</table>" >>master.html
+
+if [ -s "$OUTA" ]; then
+  echo "<p><u>Usernames/addresses found in documents:</u><p><pre>" >>master.html
+
+  cat "$OUTA" | grep -v ':[0-9A-F][0-9A-F]:' | sort | uniq -c | \
+    sort -r -n >>master.html
+
+  echo >>master.html
+
+  cat "$OUTA" | grep ':[0-9A-F][0-9A-F]:' | sort | uniq -c | \
+    sort -r -n >>master.html
+
+fi
+
+rm -f "$OUTA"
+
+cat >>master.html <<_EOF_
+</pre></body></html>
+_EOF_
+
+echo " done"
+
+exit 0
